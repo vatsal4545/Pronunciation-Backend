@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 import json
 import base64
 import wave
+from flask import send_file
 
 # Load environment variables from .env file
 load_dotenv()
@@ -53,6 +54,27 @@ You are an AI pronunciation tutor named Speak Spark. Your job is to engage users
 7. Ask open-ended questions to keep the conversation flowing.
 8. Correct grammar mistakes naturally within the conversation context.
 """
+
+@app.route('/api/generate_speech', methods=['POST'])
+def generate_speech_endpoint():
+    data = request.json
+    text = data.get('text', '')
+    session_id = data.get('session_id', '')
+    
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    
+    try:
+        # Generate speech using Azure TTS
+        speech_file_path = generate_speech(text)
+        
+        return jsonify({
+            'audio_url': '/api/get_audio/' + os.path.basename(speech_file_path)
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/start_conversation', methods=['POST'])
 def start_conversation():
