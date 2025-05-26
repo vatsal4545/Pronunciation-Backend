@@ -2,6 +2,6 @@ services:
   - type: web
     name: pronunciation-backend
     env: python
-    preBuildCommand: apt-get update && apt-get install -y libsndfile1
+    preBuildCommand: apt-get update && apt-get install -y libsndfile1 libssl-dev libasound2
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
