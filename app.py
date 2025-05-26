@@ -494,6 +494,10 @@ def create_enhanced_context(session_id):
 def generate_speech(text):
     """Generate speech using Azure TTS with fallback to OpenAI TTS"""
     try:
+        # Check if Azure credentials are available
+        if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+            raise Exception("Azure credentials not available")
+            
         # Try Azure first
         speech_config = speechsdk.SpeechConfig(
             subscription=AZURE_SPEECH_KEY, 
