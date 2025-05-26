@@ -8,14 +8,10 @@ import tempfile
 # import soundfile as sf
 import numpy as np
 import openai
-# Try to import Azure Speech SDK, but make it optional for production
-try:
-    import azure.cognitiveservices.speech as speechsdk
-    AZURE_SDK_AVAILABLE = True
-except ImportError:
-    print("Azure Speech SDK not available - using OpenAI TTS only")
-    speechsdk = None
-    AZURE_SDK_AVAILABLE = False
+# Temporarily disable Azure Speech SDK for production deployment
+print("Azure Speech SDK disabled for production - using OpenAI TTS only")
+speechsdk = None
+AZURE_SDK_AVAILABLE = False
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import json
@@ -544,10 +540,8 @@ def generate_speech_openai(text):
     try:
         print("Using OpenAI TTS...")
         
-        # Create OpenAI client
-        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
-        response = client.audio.speech.create(
+        # Use the global openai client (simpler approach)
+        response = openai.audio.speech.create(
             model="tts-1",
             voice="nova",
             input=text
@@ -556,7 +550,8 @@ def generate_speech_openai(text):
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
         
         # Write the audio content to file
-        response.stream_to_file(output_path)
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
         
         print("OpenAI TTS successful")
         return output_path
