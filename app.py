@@ -605,43 +605,33 @@ def generate_speech_openai(text):
         if not api_key:
             raise Exception("OpenAI API key not available")
         
-        # Try different OpenAI client initialization methods for compatibility
+        # Use the simplest OpenAI approach to avoid compatibility issues
         try:
-            # Method 1: Use the newer client approach
-            client = openai.OpenAI(api_key=api_key)
-            response = client.audio.speech.create(
+            # Set the API key globally (most compatible approach)
+            openai.api_key = api_key
+            
+            # Create the client without any extra parameters
+            response = openai.audio.speech.create(
                 model="tts-1",
                 voice="nova",
                 input=text
             )
-        except Exception as client_error:
-            print(f"OpenAI client method failed: {client_error}")
-            try:
-                # Method 2: Use the global openai approach (older versions)
-                openai.api_key = api_key
-                response = openai.audio.speech.create(
-                    model="tts-1",
-                    voice="nova",
-                    input=text
-                )
-            except Exception as global_error:
-                print(f"OpenAI global method failed: {global_error}")
-                raise Exception("Both OpenAI methods failed")
+            print("OpenAI TTS call successful")
+            
+        except Exception as openai_error:
+            print(f"OpenAI TTS call failed: {openai_error}")
+            raise Exception(f"OpenAI TTS failed: {openai_error}")
         
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
         
-        # Write the audio content to file with error handling
+        # Write the audio content to file
         try:
-            # Try the newer response.content approach
             with open(output_path, 'wb') as f:
                 f.write(response.content)
-        except AttributeError:
-            try:
-                # Try the stream_to_file approach
-                response.stream_to_file(output_path)
-            except Exception as write_error:
-                print(f"File writing failed: {write_error}")
-                raise Exception("Failed to write audio file")
+            print("Audio file written successfully")
+        except Exception as write_error:
+            print(f"File writing failed: {write_error}")
+            raise Exception("Failed to write audio file")
         
         print("OpenAI TTS successful")
         return output_path
