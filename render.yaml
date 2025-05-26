@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: pronunciation-backend
+    env: python
+    preBuildCommand: apt-get update && apt-get install -y libsndfile1
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
