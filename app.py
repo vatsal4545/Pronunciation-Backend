@@ -210,7 +210,8 @@ def process_speech():
                     transcript = "This is a test transcript for fake audio data"
                 else:
                     print("Processing real audio file...")
-                    # Use requests to call OpenAI API directly (avoid SDK issues)
+                    
+                    # Use HTTP request but with proper file format handling
                     api_key = os.getenv("OPENAI_API_KEY")
                     if not api_key:
                         raise Exception("OpenAI API key not available")
@@ -219,13 +220,29 @@ def process_speech():
                         "Authorization": f"Bearer {api_key}"
                     }
                     
-                    # Reset file pointer and read again for the API call
+                    # Get the original filename and detect format properly
+                    original_filename = request.files['audio'].filename or "audio.wav"
+                    
+                    # Determine the correct MIME type based on file extension
+                    if original_filename.lower().endswith('.webm'):
+                        mime_type = "audio/webm"
+                        filename_for_api = "audio.webm"
+                    elif original_filename.lower().endswith('.mp4'):
+                        mime_type = "audio/mp4"
+                        filename_for_api = "audio.mp4"
+                    elif original_filename.lower().endswith('.ogg'):
+                        mime_type = "audio/ogg"
+                        filename_for_api = "audio.ogg"
+                    else:
+                        # Default to wav
+                        mime_type = "audio/wav"
+                        filename_for_api = "audio.wav"
+                    
+                    print(f"Using file format: {filename_for_api} with MIME type: {mime_type}")
+                    
                     with open(temp_audio_path, "rb") as audio_file:
-                        # Try to detect the actual file format
-                        original_filename = request.files['audio'].filename or "audio.wav"
-                        
                         files = {
-                            "file": (original_filename, audio_file, "audio/wav"),
+                            "file": (filename_for_api, audio_file, mime_type),
                             "model": (None, "whisper-1"),
                             "response_format": (None, "text")
                         }
@@ -246,8 +263,10 @@ def process_speech():
                         else:
                             print(f"OpenAI API error response: {response.text}")
                             raise Exception(f"OpenAI API error: {response.status_code} - {response.text}")
+                    
+                    print(f"Transcription successful: {transcript[:50] if transcript else 'Empty'}...")
             
-            print(f"Transcription successful: {transcript[:50]}...")
+            print(f"Transcription completed: {len(str(transcript))} characters")
                     
         except Exception as transcription_error:
             print(f"Transcription failed: {transcription_error}")
@@ -508,12 +527,11 @@ def assess_pronunciation_azure(reference_text, audio_path):
 
 def check_grammar_openai(text):
     """
-    Check grammar using OpenAI GPT-4o via direct HTTP request
+    Check grammar using OpenAI GPT-4o via HTTP request
     """
     try:
         print("Starting grammar check...")
         
-        # Use direct HTTP request to avoid SDK issues
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise Exception("OpenAI API key not available")
@@ -782,7 +800,6 @@ def create_fallback_pronunciation_assessment(reference_text):
 def get_detailed_pronunciation_tips(word):
     """Get detailed pronunciation tips for a specific word using GPT"""
     try:
-        # Use direct HTTP request to avoid SDK issues
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise Exception("OpenAI API key not available")
