@@ -8,11 +8,34 @@ import tempfile
 # import soundfile as sf
 import numpy as np
 import openai
-# Temporarily disable Azure Speech SDK for production deployment
-print("=== STARTUP: Azure Speech SDK disabled for production - using OpenAI TTS only ===")
-speechsdk = None
-AZURE_SDK_AVAILABLE = False
-print(f"=== AZURE_SDK_AVAILABLE: {AZURE_SDK_AVAILABLE} ===")
+# Try to import and initialize Azure Speech SDK with comprehensive error handling
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    print("=== Azure Speech SDK imported successfully ===")
+    
+    # Test if Azure SDK can initialize (this is where Error 2153 occurs)
+    try:
+        # Try to create a minimal config to test initialization
+        test_config = speechsdk.SpeechConfig(subscription="test", region="eastus")
+        print("=== Azure Speech SDK initialization test passed ===")
+        AZURE_SDK_AVAILABLE = True
+    except Exception as init_error:
+        print(f"=== Azure Speech SDK initialization failed: {init_error} ===")
+        print("=== Will use OpenAI TTS as fallback ===")
+        AZURE_SDK_AVAILABLE = False
+        
+except ImportError as import_error:
+    print(f"=== Azure Speech SDK import failed: {import_error} ===")
+    print("=== Will use OpenAI TTS only ===")
+    speechsdk = None
+    AZURE_SDK_AVAILABLE = False
+except Exception as general_error:
+    print(f"=== Azure Speech SDK general error: {general_error} ===")
+    print("=== Will use OpenAI TTS only ===")
+    speechsdk = None
+    AZURE_SDK_AVAILABLE = False
+
+print(f"=== FINAL AZURE_SDK_AVAILABLE: {AZURE_SDK_AVAILABLE} ===")
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import json
@@ -526,28 +549,47 @@ def generate_speech(text):
     
     try:
         print(f"Trying Azure TTS for: {text[:50]}...")
-        # Try Azure first
-        speech_config = speechsdk.SpeechConfig(
-            subscription=AZURE_SPEECH_KEY, 
-            region=AZURE_SPEECH_REGION
-        )
+        
+        # Additional runtime check for Azure platform initialization
+        try:
+            speech_config = speechsdk.SpeechConfig(
+                subscription=AZURE_SPEECH_KEY, 
+                region=AZURE_SPEECH_REGION
+            )
+        except Exception as config_error:
+            print(f"Azure config creation failed: {config_error}")
+            raise Exception("Azure config failed")
+            
         speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
         
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
         
-        speech_synthesizer = speechsdk.SpeechSynthesizer(
-            speech_config=speech_config, 
-            audio_config=audio_config
-        )
+        try:
+            audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
+        except Exception as audio_config_error:
+            print(f"Azure audio config failed: {audio_config_error}")
+            raise Exception("Azure audio config failed")
         
-        speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+        try:
+            speech_synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config, 
+                audio_config=audio_config
+            )
+        except Exception as synthesizer_error:
+            print(f"Azure synthesizer creation failed: {synthesizer_error}")
+            raise Exception("Azure synthesizer failed")
+        
+        try:
+            speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+        except Exception as synthesis_error:
+            print(f"Azure synthesis execution failed: {synthesis_error}")
+            raise Exception("Azure synthesis execution failed")
         
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             print("Azure TTS successful")
             return output_path
         else:
-            raise Exception(f"Azure TTS failed: {speech_synthesis_result.reason}")
+            raise Exception(f"Azure TTS failed with reason: {speech_synthesis_result.reason}")
             
     except Exception as e:
         print(f"Azure TTS failed, falling back to OpenAI: {str(e)}")
@@ -558,18 +600,48 @@ def generate_speech_openai(text):
     try:
         print("Using OpenAI TTS...")
         
-        # Use the global openai client (simpler approach)
-        response = openai.audio.speech.create(
-            model="tts-1",
-            voice="nova",
-            input=text
-        )
+        # Check if OpenAI API key is available
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise Exception("OpenAI API key not available")
+        
+        # Try different OpenAI client initialization methods for compatibility
+        try:
+            # Method 1: Use the newer client approach
+            client = openai.OpenAI(api_key=api_key)
+            response = client.audio.speech.create(
+                model="tts-1",
+                voice="nova",
+                input=text
+            )
+        except Exception as client_error:
+            print(f"OpenAI client method failed: {client_error}")
+            try:
+                # Method 2: Use the global openai approach (older versions)
+                openai.api_key = api_key
+                response = openai.audio.speech.create(
+                    model="tts-1",
+                    voice="nova",
+                    input=text
+                )
+            except Exception as global_error:
+                print(f"OpenAI global method failed: {global_error}")
+                raise Exception("Both OpenAI methods failed")
         
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
         
-        # Write the audio content to file
-        with open(output_path, 'wb') as f:
-            f.write(response.content)
+        # Write the audio content to file with error handling
+        try:
+            # Try the newer response.content approach
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+        except AttributeError:
+            try:
+                # Try the stream_to_file approach
+                response.stream_to_file(output_path)
+            except Exception as write_error:
+                print(f"File writing failed: {write_error}")
+                raise Exception("Failed to write audio file")
         
         print("OpenAI TTS successful")
         return output_path

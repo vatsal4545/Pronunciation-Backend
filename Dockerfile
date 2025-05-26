@@ -1,8 +1,11 @@
 FROM python:3.11
 
-# Install system dependencies (removed Azure-specific libs)
+# Install system dependencies for Azure and audio processing
 RUN apt-get update && apt-get install -y \
     libsndfile1 \
+    libssl-dev \
+    libasound2 \
+    libasound2-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
