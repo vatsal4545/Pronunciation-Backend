@@ -1,6 +1,0 @@
-services:
-  - type: web
-    name: pronunciation-backend
-    env: python
-    buildCommand: apt-get update && apt-get install -y libsndfile1 libssl-dev libasound2 && pip install -r requirements.txt
-    startCommand: gunicorn app:app
