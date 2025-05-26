@@ -9,9 +9,10 @@ import tempfile
 import numpy as np
 import openai
 # Temporarily disable Azure Speech SDK for production deployment
-print("Azure Speech SDK disabled for production - using OpenAI TTS only")
+print("=== STARTUP: Azure Speech SDK disabled for production - using OpenAI TTS only ===")
 speechsdk = None
 AZURE_SDK_AVAILABLE = False
+print(f"=== AZURE_SDK_AVAILABLE: {AZURE_SDK_AVAILABLE} ===")
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import json
@@ -104,6 +105,23 @@ def generate_speech_endpoint():
         print(f"Speech generation error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'azure_sdk_available': AZURE_SDK_AVAILABLE,
+        'openai_key_set': bool(os.getenv("OPENAI_API_KEY")),
+        'azure_key_set': bool(os.getenv("AZURE_SPEECH_KEY")),
+        'message': 'Azure disabled, using OpenAI TTS only'
+    })
+    return jsonify({
+        'status': 'healthy',
+        'azure_sdk_available': AZURE_SDK_AVAILABLE,
+        'openai_key_set': bool(os.getenv("OPENAI_API_KEY")),
+        'azure_key_set': bool(os.getenv("AZURE_SPEECH_KEY")),
+        'message': 'Azure disabled, using OpenAI TTS only'
+    })
 
 @app.route('/api/start_conversation', methods=['POST'])
 def start_conversation():
