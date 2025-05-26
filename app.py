@@ -8,7 +8,14 @@ import tempfile
 # import soundfile as sf
 import numpy as np
 import openai
-import azure.cognitiveservices.speech as speechsdk
+# Try to import Azure Speech SDK, but make it optional for production
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    AZURE_SDK_AVAILABLE = True
+except ImportError:
+    print("Azure Speech SDK not available - using OpenAI TTS only")
+    speechsdk = None
+    AZURE_SDK_AVAILABLE = False
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 import json
@@ -255,6 +262,11 @@ def assess_pronunciation_azure(reference_text, audio_path):
     """
     Perform real pronunciation assessment using Azure Speech Services
     """
+    # If Azure SDK is not available, return a fallback assessment
+    if not AZURE_SDK_AVAILABLE or not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+        print("Azure Speech SDK not available - using fallback pronunciation assessment")
+        return create_fallback_pronunciation_assessment(reference_text)
+    
     try:
         # Configure speech recognition with pronunciation assessment
         speech_config = speechsdk.SpeechConfig(
@@ -493,11 +505,13 @@ def create_enhanced_context(session_id):
 
 def generate_speech(text):
     """Generate speech using Azure TTS with fallback to OpenAI TTS"""
+    # If Azure SDK is not available or credentials missing, use OpenAI directly
+    if not AZURE_SDK_AVAILABLE or not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+        print(f"Using OpenAI TTS (Azure not available): {text[:50]}...")
+        return generate_speech_openai(text)
+    
     try:
-        # Check if Azure credentials are available
-        if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
-            raise Exception("Azure credentials not available")
-            
+        print(f"Trying Azure TTS for: {text[:50]}...")
         # Try Azure first
         speech_config = speechsdk.SpeechConfig(
             subscription=AZURE_SPEECH_KEY, 
@@ -516,19 +530,24 @@ def generate_speech(text):
         speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
         
         if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            print("Azure TTS successful")
             return output_path
         else:
             raise Exception(f"Azure TTS failed: {speech_synthesis_result.reason}")
             
     except Exception as e:
-        print(f"Azure TTS failed, trying OpenAI TTS: {str(e)}")
-        # Fallback to OpenAI TTS
+        print(f"Azure TTS failed, falling back to OpenAI: {str(e)}")
         return generate_speech_openai(text)
 
 def generate_speech_openai(text):
     """Fallback speech generation using OpenAI TTS"""
     try:
-        response = openai.audio.speech.create(
+        print("Using OpenAI TTS...")
+        
+        # Create OpenAI client
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = client.audio.speech.create(
             model="tts-1",
             voice="nova",
             input=text
@@ -536,15 +555,41 @@ def generate_speech_openai(text):
         
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
         
-        with open(output_path, 'wb') as f:
-            for chunk in response.iter_bytes():
-                f.write(chunk)
+        # Write the audio content to file
+        response.stream_to_file(output_path)
         
+        print("OpenAI TTS successful")
         return output_path
         
     except Exception as e:
-        raise Exception(f"Both Azure and OpenAI TTS failed: {str(e)}")
+        print(f"OpenAI TTS error: {str(e)}")
+        raise Exception(f"Speech generation failed: {str(e)}")
 
+
+def create_fallback_pronunciation_assessment(reference_text):
+    """
+    Create a fallback pronunciation assessment when Azure is not available
+    """
+    words = reference_text.split()
+    word_details = []
+    
+    for word in words:
+        word_detail = {
+            'word': word,
+            'accuracy_score': 85,  # Default score
+            'error_type': 'None',
+            'phonemes': []
+        }
+        word_details.append(word_detail)
+    
+    return {
+        'accuracy_score': 85,
+        'fluency_score': 80,
+        'completeness_score': 90,
+        'pronunciation_score': 85,
+        'word_details': word_details,
+        'note': 'Fallback assessment - Azure Speech SDK not available'
+    }
 
 def get_detailed_pronunciation_tips(word):
     """Get detailed pronunciation tips for a specific word using GPT"""
