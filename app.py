@@ -189,15 +189,27 @@ def process_speech():
     
     try:
         # Transcribe audio using Whisper
-        with open(temp_audio_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="text"
-            )
+        try:
+            # Ensure OpenAI API key is set
+            openai.api_key = os.getenv("OPENAI_API_KEY")
+            
+            with open(temp_audio_path, "rb") as audio_file:
+                transcript = openai.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="text"
+                )
+            print(f"Transcription successful: {transcript[:50]}...")
+        except Exception as transcription_error:
+            print(f"Transcription failed: {transcription_error}")
+            return jsonify({'error': f'Audio transcription failed: {str(transcription_error)}'}), 500
         
-        # Perform real pronunciation assessment using Azure
-        pronunciation_assessment = assess_pronunciation_azure(transcript, temp_audio_path)
+        # Perform pronunciation assessment (Azure with fallback)
+        try:
+            pronunciation_assessment = assess_pronunciation_azure(transcript, temp_audio_path)
+        except Exception as pronunciation_error:
+            print(f"Pronunciation assessment failed: {pronunciation_error}")
+            pronunciation_assessment = create_fallback_pronunciation_assessment(transcript)
         
         # Check grammar using OpenAI GPT
         grammar_feedback = check_grammar_openai(transcript)
@@ -240,6 +252,7 @@ def get_ai_response():
         enhanced_context = create_enhanced_context(session_id)
         
         # Get AI response based on conversation history with feedback
+        openai.api_key = os.getenv("OPENAI_API_KEY")
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=enhanced_context,
@@ -374,7 +387,8 @@ def assess_pronunciation_azure(reference_text, audio_path):
     
     except Exception as e:
         print(f"Azure pronunciation assessment error: {str(e)}")
-        return {'error': f'Pronunciation assessment failed: {str(e)}'}
+        print("Falling back to simple pronunciation assessment")
+        return create_fallback_pronunciation_assessment(reference_text)
 
 # def check_grammar_openai(text):
 #     """
@@ -420,6 +434,9 @@ def check_grammar_openai(text):
     Check grammar using OpenAI GPT-4o
     """
     try:
+        # Ensure OpenAI API key is set
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -669,6 +686,9 @@ def create_fallback_pronunciation_assessment(reference_text):
 def get_detailed_pronunciation_tips(word):
     """Get detailed pronunciation tips for a specific word using GPT"""
     try:
+        # Ensure OpenAI API key is set
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
