@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os
@@ -6,7 +5,7 @@ import time
 import uuid
 import requests
 import tempfile
-import soundfile as sf
+# import soundfile as sf
 import numpy as np
 import openai
 import azure.cognitiveservices.speech as speechsdk
@@ -55,6 +54,28 @@ You are an AI pronunciation tutor named Speak Spark. Your job is to engage users
 8. Correct grammar mistakes naturally within the conversation context.
 """
 
+# @app.route('/api/generate_speech', methods=['POST'])
+# def generate_speech_endpoint():
+#     data = request.json
+#     text = data.get('text', '')
+#     session_id = data.get('session_id', '')
+    
+#     if not text:
+#         return jsonify({'error': 'No text provided'}), 400
+    
+#     try:
+#         # Generate speech using Azure TTS
+#         speech_file_path = generate_speech(text)
+        
+#         return jsonify({
+#             'audio_url': '/api/get_audio/' + os.path.basename(speech_file_path)
+#         })
+    
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+
+
 @app.route('/api/generate_speech', methods=['POST'])
 def generate_speech_endpoint():
     data = request.json
@@ -65,6 +86,10 @@ def generate_speech_endpoint():
         return jsonify({'error': 'No text provided'}), 400
     
     try:
+        print(f"Generating speech for: {text[:50]}...")
+        print(f"Azure Speech Key: {AZURE_SPEECH_KEY[:10] if AZURE_SPEECH_KEY else 'NOT SET'}...")
+        print(f"Azure Speech Region: {AZURE_SPEECH_REGION}")
+        
         # Generate speech using Azure TTS
         speech_file_path = generate_speech(text)
         
@@ -73,6 +98,7 @@ def generate_speech_endpoint():
         })
     
     except Exception as e:
+        print(f"Speech generation error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -275,20 +301,20 @@ def assess_pronunciation_azure(reference_text, audio_path):
             # Get word-level details
             words = pronunciation_result.words
             for word in words:
+                phonemes = []
+                if hasattr(word, 'phonemes') and word.phonemes:
+                    phonemes = [{'phoneme': p.phoneme, 'accuracy_score': p.accuracy_score} for p in word.phonemes]
+                elif hasattr(word, 'syllables') and word.syllables:
+                    for syllable in word.syllables:
+                        if hasattr(syllable, 'phonemes') and syllable.phonemes:
+                            phonemes.extend([{'phoneme': p.phoneme, 'accuracy_score': p.accuracy_score} for p in syllable.phonemes])
+                
                 word_detail = {
                     'word': word.word,
                     'accuracy_score': word.accuracy_score,
-                    'error_type': word.error_type.name if word.error_type else 'None',
-                    'phonemes': []
+                    'error_type': str(word.error_type) if word.error_type else 'None',
+                    'phonemes': phonemes
                 }
-                
-                # Get phoneme-level details
-                for phoneme in word.phonemes:
-                    phoneme_detail = {
-                        'phoneme': phoneme.phoneme,
-                        'accuracy_score': phoneme.accuracy_score
-                    }
-                    word_detail['phonemes'].append(phoneme_detail)
                 
                 assessment_result['word_details'].append(word_detail)
             
@@ -300,6 +326,45 @@ def assess_pronunciation_azure(reference_text, audio_path):
     except Exception as e:
         print(f"Azure pronunciation assessment error: {str(e)}")
         return {'error': f'Pronunciation assessment failed: {str(e)}'}
+
+# def check_grammar_openai(text):
+#     """
+#     Check grammar using OpenAI GPT-4o
+#     """
+#     try:
+#         completion = openai.chat.completions.create(
+#             model="gpt-4o",
+#             messages=[
+#                 {
+#                     "role": "system", 
+#                     "content": """You are a grammar expert. Analyze the given text for grammar errors and provide specific corrections. 
+#                     Return a JSON object with:
+#                     - 'has_errors': boolean
+#                     - 'errors': array of objects with 'original', 'correction', 'explanation'
+#                     - 'corrected_text': the fully corrected version
+#                     - 'grammar_score': number from 0-100"""
+#                 },
+#                 {
+#                     "role": "user", 
+#                     "content": f"Check this text for grammar errors: '{text}'"
+#                 }
+#             ],
+#             response_format={ "type": "json_object" },
+#             max_tokens=300
+#         )
+        
+#         grammar_result = json.loads(completion.choices[0].message.content)
+#         return grammar_result
+    
+#     except Exception as e:
+#         print(f"Grammar checking error: {str(e)}")
+#         return {
+#             'has_errors': False,
+#             'errors': [],
+#             'corrected_text': text,
+#             'grammar_score': 85,
+#             'error': f'Grammar check failed: {str(e)}'
+#         }
 
 def check_grammar_openai(text):
     """
@@ -316,18 +381,32 @@ def check_grammar_openai(text):
                     - 'has_errors': boolean
                     - 'errors': array of objects with 'original', 'correction', 'explanation'
                     - 'corrected_text': the fully corrected version
-                    - 'grammar_score': number from 0-100"""
+                    - 'grammar_score': number from 0-100
+                    Make sure all strings in the JSON are properly escaped."""
                 },
                 {
                     "role": "user", 
-                    "content": f"Check this text for grammar errors: '{text}'"
+                    "content": f"Check this text for grammar errors: {json.dumps(text)}"
                 }
             ],
             response_format={ "type": "json_object" },
             max_tokens=300
         )
         
-        grammar_result = json.loads(completion.choices[0].message.content)
+        # Use json.loads with error handling
+        try:
+            grammar_result = json.loads(completion.choices[0].message.content)
+        except json.JSONDecodeError as json_error:
+            print(f"JSON parsing error: {json_error}")
+            # Return fallback result
+            return {
+                'has_errors': False,
+                'errors': [],
+                'corrected_text': text,
+                'grammar_score': 85,
+                'error': f'Grammar check failed: {str(json_error)}'
+            }
+        
         return grammar_result
     
     except Exception as e:
@@ -380,37 +459,88 @@ def create_enhanced_context(session_id):
     
     return context
 
+# def generate_speech(text):
+#     """Generate speech using Azure TTS and return the path to the audio file"""
+#     # Configure speech synthesis
+#     speech_config = speechsdk.SpeechConfig(
+#         subscription=AZURE_SPEECH_KEY, 
+#         region=AZURE_SPEECH_REGION
+#     )
+    
+#     # Use a clear, neutral voice for pronunciation teaching
+#     speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+    
+#     # Create a temporary file for the audio output
+#     output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+    
+#     # Configure audio output
+#     audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
+    
+#     # Create a speech synthesizer
+#     speech_synthesizer = speechsdk.SpeechSynthesizer(
+#         speech_config=speech_config, 
+#         audio_config=audio_config
+#     )
+    
+#     # Synthesize text to speech
+#     speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+    
+#     # Check result
+#     if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+#         return output_path
+#     else:
+#         raise Exception(f"Speech synthesis failed: {speech_synthesis_result.reason}")
+
 def generate_speech(text):
-    """Generate speech using Azure TTS and return the path to the audio file"""
-    # Configure speech synthesis
-    speech_config = speechsdk.SpeechConfig(
-        subscription=AZURE_SPEECH_KEY, 
-        region=AZURE_SPEECH_REGION
-    )
-    
-    # Use a clear, neutral voice for pronunciation teaching
-    speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
-    
-    # Create a temporary file for the audio output
-    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
-    
-    # Configure audio output
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
-    
-    # Create a speech synthesizer
-    speech_synthesizer = speechsdk.SpeechSynthesizer(
-        speech_config=speech_config, 
-        audio_config=audio_config
-    )
-    
-    # Synthesize text to speech
-    speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
-    
-    # Check result
-    if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+    """Generate speech using Azure TTS with fallback to OpenAI TTS"""
+    try:
+        # Try Azure first
+        speech_config = speechsdk.SpeechConfig(
+            subscription=AZURE_SPEECH_KEY, 
+            region=AZURE_SPEECH_REGION
+        )
+        speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+        
+        output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
+        
+        speech_synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=speech_config, 
+            audio_config=audio_config
+        )
+        
+        speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+        
+        if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            return output_path
+        else:
+            raise Exception(f"Azure TTS failed: {speech_synthesis_result.reason}")
+            
+    except Exception as e:
+        print(f"Azure TTS failed, trying OpenAI TTS: {str(e)}")
+        # Fallback to OpenAI TTS
+        return generate_speech_openai(text)
+
+def generate_speech_openai(text):
+    """Fallback speech generation using OpenAI TTS"""
+    try:
+        response = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=text
+        )
+        
+        output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+        
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_bytes():
+                f.write(chunk)
+        
         return output_path
-    else:
-        raise Exception(f"Speech synthesis failed: {speech_synthesis_result.reason}")
+        
+    except Exception as e:
+        raise Exception(f"Both Azure and OpenAI TTS failed: {str(e)}")
+
 
 def get_detailed_pronunciation_tips(word):
     """Get detailed pronunciation tips for a specific word using GPT"""
