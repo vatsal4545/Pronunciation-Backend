@@ -187,6 +187,16 @@ def process_speech():
         audio_file.save(temp_audio.name)
         temp_audio_path = temp_audio.name
     
+    # Check file size and basic validation
+    file_size = os.path.getsize(temp_audio_path)
+    print(f"Audio file saved: {file_size} bytes")
+    
+    if file_size == 0:
+        return jsonify({'error': 'Empty audio file received'}), 400
+    
+    if file_size > 25 * 1024 * 1024:  # 25MB limit for OpenAI
+        return jsonify({'error': 'Audio file too large (max 25MB)'}), 400
+    
     try:
         # Transcribe audio using Whisper (with fallback for testing)
         try:
@@ -211,8 +221,11 @@ def process_speech():
                     
                     # Reset file pointer and read again for the API call
                     with open(temp_audio_path, "rb") as audio_file:
+                        # Try to detect the actual file format
+                        original_filename = request.files['audio'].filename or "audio.wav"
+                        
                         files = {
-                            "file": ("audio.wav", audio_file, "audio/wav"),
+                            "file": (original_filename, audio_file, "audio/wav"),
                             "model": (None, "whisper-1"),
                             "response_format": (None, "text")
                         }
