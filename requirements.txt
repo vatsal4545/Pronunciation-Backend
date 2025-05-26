@@ -4,7 +4,7 @@ Flask-CORS==4.0.0
 python-dotenv==1.0.0
 requests==2.31.0
 openai==1.4.0
-numpy==1.26.1
+numpy
 soundfile
 azure-cognitiveservices-speech==1.32.1
 Werkzeug==2.3.7
