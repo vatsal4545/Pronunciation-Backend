@@ -199,6 +199,7 @@ def process_speech():
                     print("Detected test audio - using fallback transcript")
                     transcript = "This is a test transcript for fake audio data"
                 else:
+                    print("Processing real audio file...")
                     # Use requests to call OpenAI API directly (avoid SDK issues)
                     api_key = os.getenv("OPENAI_API_KEY")
                     if not api_key:
@@ -208,22 +209,29 @@ def process_speech():
                         "Authorization": f"Bearer {api_key}"
                     }
                     
+                    # Reset file pointer and read again for the API call
                     with open(temp_audio_path, "rb") as audio_file:
                         files = {
-                            "file": audio_file,
+                            "file": ("audio.wav", audio_file, "audio/wav"),
                             "model": (None, "whisper-1"),
                             "response_format": (None, "text")
                         }
                         
+                        print("Calling OpenAI Whisper API...")
                         response = requests.post(
                             "https://api.openai.com/v1/audio/transcriptions",
                             headers=headers,
-                            files=files
+                            files=files,
+                            timeout=30
                         )
                         
+                        print(f"OpenAI API response status: {response.status_code}")
+                        
                         if response.status_code == 200:
-                            transcript = response.text
+                            transcript = response.text.strip()
+                            print(f"Transcription received: {len(transcript)} characters")
                         else:
+                            print(f"OpenAI API error response: {response.text}")
                             raise Exception(f"OpenAI API error: {response.status_code} - {response.text}")
             
             print(f"Transcription successful: {transcript[:50]}...")
@@ -290,14 +298,32 @@ def get_ai_response():
         enhanced_context = create_enhanced_context(session_id)
         
         # Get AI response based on conversation history with feedback
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=enhanced_context,
-            max_tokens=200
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise Exception("OpenAI API key not available")
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "gpt-4o",
+            "messages": enhanced_context,
+            "max_tokens": 200
+        }
+        
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload
         )
         
-        ai_response = completion.choices[0].message.content
+        if response.status_code == 200:
+            result = response.json()
+            ai_response = result['choices'][0]['message']['content']
+        else:
+            raise Exception(f"OpenAI API error: {response.status_code} - {response.text}")
         
         # Add AI response to history
         sessions[session_id]['history'].append({"role": "assistant", "content": ai_response})
@@ -743,12 +769,19 @@ def create_fallback_pronunciation_assessment(reference_text):
 def get_detailed_pronunciation_tips(word):
     """Get detailed pronunciation tips for a specific word using GPT"""
     try:
-        # Ensure OpenAI API key is set
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        # Use direct HTTP request to avoid SDK issues
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise Exception("OpenAI API key not available")
         
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "gpt-4o",
+            "messages": [
                 {
                     "role": "system", 
                     "content": "You are a pronunciation expert. Provide detailed, practical tips for pronouncing English words correctly. Include phonetic breakdown, common mistakes, and practice suggestions."
@@ -758,10 +791,21 @@ def get_detailed_pronunciation_tips(word):
                     "content": f"Provide detailed pronunciation tips for the word '{word}'"
                 }
             ],
-            max_tokens=200
+            "max_tokens": 200
+        }
+        
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload
         )
         
-        return completion.choices[0].message.content
+        if response.status_code == 200:
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        else:
+            raise Exception(f"OpenAI API error: {response.status_code} - {response.text}")
+            
     except Exception as e:
         return f"Focus on saying '{word}' clearly. Break it down syllable by syllable and practice slowly before increasing speed."
 
