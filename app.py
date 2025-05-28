@@ -197,38 +197,30 @@ def process_speech():
         return jsonify({'error': 'Audio file too large (max 25MB)'}), 400
     
     try:
-        # Use Azure Speech Services exclusively for transcription and pronunciation assessment
+        # Use Azure Speech Services for transcription and pronunciation assessment
         print("Starting Azure Speech processing...")
         
-        # Check if this is a test with fake audio data
-        with open(temp_audio_path, "rb") as f:
-            audio_content = f.read()
-            if b"fake audio data" in audio_content:
-                print("Detected test audio - using fallback transcript")
-                transcript = "This is a test transcript for fake audio data"
-                pronunciation_assessment = create_basic_dynamic_assessment(transcript)
-            else:
-                print("Processing real audio with Azure Speech Services...")
-                
-                # Skip Azure SDK due to compatibility issues, use REST API directly
-                print("Using Azure REST API for speech processing...")
-                
-                try:
-                    result = transcribe_simple_azure_rest(temp_audio_path)
-                    transcript = result.get('transcript', '')
-                    pronunciation_assessment = result
-                except Exception as rest_error:
-                    print(f"Azure REST API failed: {rest_error}")
-                    # Create a basic fallback assessment
-                    transcript = "I'm having trouble processing the audio"
-                    pronunciation_assessment = {
-                        'transcript': transcript,
-                        'accuracy_score': 75,
-                        'fluency_score': 75,
-                        'pronunciation_score': 75,
-                        'word_details': [],
-                        'assessment_mode': 'basic_fallback'
-                    }
+        print("Processing real audio with Azure Speech Services...")
+        
+        # Skip Azure SDK due to compatibility issues, use REST API directly
+        print("Using Azure REST API for speech processing...")
+        
+        try:
+            result = transcribe_simple_azure_rest(temp_audio_path)
+            transcript = result.get('transcript', '')
+            pronunciation_assessment = result
+        except Exception as rest_error:
+            print(f"Azure REST API failed: {rest_error}")
+            # Create a basic fallback assessment
+            transcript = "I'm having trouble processing the audio"
+            pronunciation_assessment = {
+                'transcript': transcript,
+                'accuracy_score': 75,
+                'fluency_score': 75,
+                'pronunciation_score': 75,
+                'word_details': [],
+                'assessment_mode': 'basic_fallback'
+            }
         
         print(f"Azure transcription completed: {transcript}")
         print(f"Pronunciation assessment mode: {pronunciation_assessment.get('assessment_mode', 'unknown')}")
