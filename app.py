@@ -182,6 +182,8 @@ def process_speech():
     
     session_id = request.form.get('session_id', '')
     if session_id not in sessions:
+        print(f"Invalid session ID received: {session_id}")
+        print(f"Available sessions: {list(sessions.keys())}")
         return jsonify({'error': 'Invalid session ID'}), 400
     
     audio_file = request.files['audio']
