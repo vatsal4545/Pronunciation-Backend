@@ -14,9 +14,9 @@ try:
     import azure.cognitiveservices.speech as speechsdk
     print("=== Azure Speech SDK imported successfully ===")
     
-    # Disable SDK due to Windows compatibility issues
-    print("=== Azure Speech SDK disabled due to platform compatibility ===")
-    AZURE_SDK_AVAILABLE = False
+    # Enable SDK for advanced features (content assessment, prosody, etc.)
+    print("=== Azure Speech SDK enabled for advanced pronunciation assessment ===")
+    AZURE_SDK_AVAILABLE = True
         
 except ImportError as import_error:
     print(f"=== Azure Speech SDK import failed: {import_error} ===")
@@ -205,20 +205,40 @@ def process_speech():
         # For now, we'll assume SDK might still have issues and proceed with REST first,
         # but ideally, SDK would be the primary method if it works.
 
-        # Try Azure REST API with pronunciation assessment
-        transcript_data = transcribe_and_assess_with_azure_rest(processed_audio_path)
-        transcript = transcript_data.get('transcript', '')
-        pronunciation_assessment = transcript_data
+        # Try advanced Azure SDK assessment first (with content assessment, prosody, etc.)
+        if AZURE_SDK_AVAILABLE:
+            try:
+                print("🔬 Attempting advanced Azure SDK assessment...")
+                conversation_topic = get_topic_for_conversation(session_id)
+                pronunciation_assessment = assess_pronunciation_azure_advanced(processed_audio_path, conversation_topic)
+                transcript = pronunciation_assessment.get('transcript', '')
+                
+                if transcript and pronunciation_assessment.get('assessment_mode', '').startswith('azure_advanced_sdk'):
+                    print(f"✅ Advanced Azure SDK assessment successful: {transcript}")
+                else:
+                    print("⚠️ Advanced Azure SDK returned no transcript, trying REST API...")
+                    raise Exception("No transcript from advanced SDK")
+                    
+            except Exception as sdk_error:
+                print(f"❌ Advanced Azure SDK failed: {sdk_error}")
+                print("🔄 Falling back to Azure REST API...")
+                
+                # Fallback to Azure REST API
+                pronunciation_assessment = transcribe_and_assess_with_azure_rest(processed_audio_path)
+                transcript = pronunciation_assessment.get('transcript', '')
+        else:
+            print("⚠️ Azure SDK not available, using REST API...")
+            # Use Azure REST API as fallback
+            pronunciation_assessment = transcribe_and_assess_with_azure_rest(processed_audio_path)
+            transcript = pronunciation_assessment.get('transcript', '')
 
-        if not transcript and basic_result and basic_result.get('Duration', 0) > 0:
-            print("Azure REST API returned empty transcript despite detecting audio. Trying OpenAI Whisper...")
-            # (Your existing Whisper fallback logic would go here or be refactored)
-            # For now, let's assume if Azure REST fails with empty transcript, it's an issue.
-            pronunciation_assessment['assessment_mode'] = 'azure_rest_empty_transcript_fallback'
-            transcript = "Azure could not transcribe the audio clearly."
-            pronunciation_assessment['transcript'] = transcript
+        # Final fallback check - if still no transcript, there's an issue
+        if not transcript or transcript in ["Azure STT failed even with WAV. Please check Azure logs.", 
+                                           "Both Azure and OpenAI transcription failed. Please check your internet connection."]:
+            print("⚠️ Both Azure methods failed, using OpenAI Whisper as final fallback...")
+            pronunciation_assessment['assessment_mode'] = 'azure_failed_fallback'
             if not pronunciation_assessment.get('word_details'):
-                 pronunciation_assessment['word_details'] = create_word_details_from_transcript(transcript)
+                pronunciation_assessment['word_details'] = create_word_details_from_transcript(transcript or "No transcription available")
 
 
         # ... (rest of your process_speech logic: grammar, context, AI response, etc.)
@@ -608,6 +628,17 @@ def create_enhanced_context(session_id):
         latest_pronunciation = session['pronunciation_feedback'][-1]
         feedback_summary = f"Recent pronunciation assessment: Overall score {latest_pronunciation.get('pronunciation_score', 'N/A')}/100. "
         
+        # Add content assessment feedback if available (from advanced Azure assessment)
+        if 'content_assessment' in latest_pronunciation:
+            content = latest_pronunciation['content_assessment']
+            feedback_summary += f"Content scores - Grammar: {content.get('grammar_score', 'N/A')}/100, "
+            feedback_summary += f"Vocabulary: {content.get('vocabulary_score', 'N/A')}/100, "
+            feedback_summary += f"Topic relevance: {content.get('topic_score', 'N/A')}/100. "
+        
+        # Add prosody feedback if available
+        if 'prosody_score' in latest_pronunciation:
+            feedback_summary += f"Speech naturalness (prosody): {latest_pronunciation['prosody_score']}/100. "
+        
         # Explicitly list mispronounced words and their scores
         if 'word_details' in latest_pronunciation:
             low_scoring_words = [
@@ -622,6 +653,11 @@ def create_enhanced_context(session_id):
                     ]) + ". "
                 )
                 feedback_summary += "Please address these words in your response, offer encouragement, and suggest practice if needed. "
+        
+        # Advanced feedback instruction for AI tutor
+        assessment_mode = latest_pronunciation.get('assessment_mode', 'unknown')
+        if assessment_mode == 'azure_advanced_sdk':
+            feedback_summary += "This is advanced assessment data with content analysis. Provide comprehensive feedback covering pronunciation, grammar, vocabulary, and topic relevance as appropriate. "
         
         context.append({
             "role": "system", 
@@ -1491,7 +1527,7 @@ def transcribe_with_openai_whisper_fallback(audio_path):
                 print(f"OpenAI Whisper transcription successful: '{transcript}'")
                 
                 # Create pronunciation assessment using our realistic algorithm
-                word_details = create_realistic_pronunciation_assessment(transcript)
+                word_details = []  # Use only real Azure data, no simulated assessment
                 
                 # Calculate overall scores
                 if word_details:
@@ -1781,103 +1817,358 @@ def analyze_audio_content(audio_path):
     except Exception as e:
         return f"Analysis failed: {e}"
 
-def create_realistic_pronunciation_assessment(transcript):
+# def create_realistic_pronunciation_assessment(transcript):
+#     """
+#     Create a realistic pronunciation assessment based on word complexity and common pronunciation challenges
+#     This simulates what Azure would detect, accounting for the fact that Whisper auto-corrects
+#     """
+#     import random
+#     import re
+    
+#     words = transcript.split()
+#     word_details = []
+    
+#     # Reduced penalties for more realistic assessment
+#     difficult_patterns = {
+#         r'th': 8,  # 'th' sounds (reduced from 15)
+#         r'[rl]': 5,  # 'r' and 'l' confusion (reduced from 10)
+#         r'tion$': 6,  # '-tion' endings (reduced from 12)
+#         r'sion$': 6,  # '-sion' endings (reduced from 12)
+#         r'ough': 10,  # 'ough' variations (reduced from 18)
+#         r'[bcdfghjklmnpqrstvwxyz]{3,}': 8,  # Consonant clusters (reduced from 15)
+#         r'eau|ieu': 12,  # French-origin sounds (reduced from 20)
+#         r'sch|tch': 5,  # Complex consonant combinations (reduced from 10)
+#     }
+    
+#     # Reduced penalties for challenging words - only truly difficult ones get marked
+#     challenging_words = {
+#         'entrepreneur': 15, 'pronunciation': 12, 'particularly': 10,  # Reduced penalties
+#         'comfortable': 8, 'temperature': 8, 'vegetable': 6,
+#         'chocolate': 4, 'interesting': 6, 'different': 3,
+#         'business': 4, 'technology': 6, 'development': 5,
+#         'communication': 8, 'organization': 10, 'responsibility': 12,
+#         'opportunity': 8, 'environment': 6, 'government': 4,
+#         'international': 10, 'professional': 8, 'experience': 6,
+#         'important': 3, 'information': 6, 'education': 5,
+#         'relationship': 8, 'management': 4, 'performance': 6,
+#         'successful': 5, 'knowledge': 4, 'strength': 6,
+#         'through': 8, 'although': 6, 'thought': 5,
+#         'enough': 4, 'rough': 6, 'cough': 4
+#     }
+    
+#     for word in words:
+#         word_lower = word.lower().strip('.,!?;:"')
+        
+#         # Higher base scores - most words should be pronounced correctly
+#         if len(word_lower) <= 3:
+#             base_score = random.randint(88, 95)  # Short words are easy (increased)
+#         elif len(word_lower) <= 5:
+#             base_score = random.randint(82, 92)  # Medium words (increased)
+#         elif len(word_lower) <= 8:
+#             base_score = random.randint(78, 88)  # Longer words (increased)
+#         else:
+#             base_score = random.randint(72, 85)  # Very long words (increased)
+        
+#         # Check if it's a known challenging word
+#         if word_lower in challenging_words:
+#             penalty = challenging_words[word_lower]
+#             base_score -= penalty
+#             print(f"Applied {penalty} penalty for challenging word: {word_lower}")
+        
+#         # Apply pattern-based penalties (reduced impact)
+#         for pattern, penalty in difficult_patterns.items():
+#             if re.search(pattern, word_lower):
+#                 actual_penalty = random.randint(penalty//3, penalty//2)  # Reduced penalty application
+#                 base_score -= actual_penalty
+#                 print(f"Applied {actual_penalty} pattern penalty for '{pattern}' in word: {word_lower}")
+#                 break  # Only apply one pattern penalty per word
+        
+#         # Reduced randomness for more consistent scoring
+#         base_score += random.randint(-3, 5)  # Slight positive bias
+        
+#         # Ensure score stays in reasonable range
+#         final_score = max(45, min(95, base_score))
+        
+#         # More lenient error type classification
+#         if final_score < 65:  # Raised threshold from 60
+#             error_type = 'Mispronunciation'
+#         elif final_score < 78:  # Raised threshold from 75
+#             error_type = 'Slight mispronunciation'
+#         else:
+#             error_type = 'None'
+        
+#         word_detail = {
+#             'word': word.strip('.,!?;:"'),  # Remove punctuation for word
+#             'accuracy_score': final_score,
+#             'error_type': error_type,
+#             'phonemes': []  # Could be expanded with phoneme analysis
+#         }
+        
+#         word_details.append(word_detail)
+    
+#     # Count how many words are marked as mispronounced
+#     mispronounced_count = sum(1 for w in word_details if w['accuracy_score'] < PRONUNCIATION_THRESHOLD)
+#     total_words = len(word_details)
+    
+#     print(f"Created realistic pronunciation assessment for {total_words} words")
+#     print(f"Marked {mispronounced_count} words as mispronounced ({mispronounced_count/total_words*100:.1f}%)")
+    
+#     return word_details
+
+@app.route('/api/test_azure', methods=['GET'])
+def test_azure_service():
     """
-    Create a realistic pronunciation assessment based on word complexity and common pronunciation challenges
-    This simulates what Azure would detect, accounting for the fact that Whisper auto-corrects
+    Test Azure Speech Service connectivity and capabilities
     """
-    import random
-    import re
+    if not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+        return jsonify({
+            'status': 'error',
+            'message': 'Azure credentials not configured',
+            'azure_speech_key_set': bool(AZURE_SPEECH_KEY),
+            'azure_speech_region_set': bool(AZURE_SPEECH_REGION)
+        })
     
-    words = transcript.split()
-    word_details = []
-    
-    # Reduced penalties for more realistic assessment
-    difficult_patterns = {
-        r'th': 8,  # 'th' sounds (reduced from 15)
-        r'[rl]': 5,  # 'r' and 'l' confusion (reduced from 10)
-        r'tion$': 6,  # '-tion' endings (reduced from 12)
-        r'sion$': 6,  # '-sion' endings (reduced from 12)
-        r'ough': 10,  # 'ough' variations (reduced from 18)
-        r'[bcdfghjklmnpqrstvwxyz]{3,}': 8,  # Consonant clusters (reduced from 15)
-        r'eau|ieu': 12,  # French-origin sounds (reduced from 20)
-        r'sch|tch': 5,  # Complex consonant combinations (reduced from 10)
-    }
-    
-    # Reduced penalties for challenging words - only truly difficult ones get marked
-    challenging_words = {
-        'entrepreneur': 15, 'pronunciation': 12, 'particularly': 10,  # Reduced penalties
-        'comfortable': 8, 'temperature': 8, 'vegetable': 6,
-        'chocolate': 4, 'interesting': 6, 'different': 3,
-        'business': 4, 'technology': 6, 'development': 5,
-        'communication': 8, 'organization': 10, 'responsibility': 12,
-        'opportunity': 8, 'environment': 6, 'government': 4,
-        'international': 10, 'professional': 8, 'experience': 6,
-        'important': 3, 'information': 6, 'education': 5,
-        'relationship': 8, 'management': 4, 'performance': 6,
-        'successful': 5, 'knowledge': 4, 'strength': 6,
-        'through': 8, 'although': 6, 'thought': 5,
-        'enough': 4, 'rough': 6, 'cough': 4
-    }
-    
-    for word in words:
-        word_lower = word.lower().strip('.,!?;:"')
+    try:
+        # Test basic Azure Speech Service endpoint
+        endpoint = f"https://{AZURE_SPEECH_REGION}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
         
-        # Higher base scores - most words should be pronounced correctly
-        if len(word_lower) <= 3:
-            base_score = random.randint(88, 95)  # Short words are easy (increased)
-        elif len(word_lower) <= 5:
-            base_score = random.randint(82, 92)  # Medium words (increased)
-        elif len(word_lower) <= 8:
-            base_score = random.randint(78, 88)  # Longer words (increased)
-        else:
-            base_score = random.randint(72, 85)  # Very long words (increased)
-        
-        # Check if it's a known challenging word
-        if word_lower in challenging_words:
-            penalty = challenging_words[word_lower]
-            base_score -= penalty
-            print(f"Applied {penalty} penalty for challenging word: {word_lower}")
-        
-        # Apply pattern-based penalties (reduced impact)
-        for pattern, penalty in difficult_patterns.items():
-            if re.search(pattern, word_lower):
-                actual_penalty = random.randint(penalty//3, penalty//2)  # Reduced penalty application
-                base_score -= actual_penalty
-                print(f"Applied {actual_penalty} pattern penalty for '{pattern}' in word: {word_lower}")
-                break  # Only apply one pattern penalty per word
-        
-        # Reduced randomness for more consistent scoring
-        base_score += random.randint(-3, 5)  # Slight positive bias
-        
-        # Ensure score stays in reasonable range
-        final_score = max(45, min(95, base_score))
-        
-        # More lenient error type classification
-        if final_score < 65:  # Raised threshold from 60
-            error_type = 'Mispronunciation'
-        elif final_score < 78:  # Raised threshold from 75
-            error_type = 'Slight mispronunciation'
-        else:
-            error_type = 'None'
-        
-        word_detail = {
-            'word': word.strip('.,!?;:"'),  # Remove punctuation for word
-            'accuracy_score': final_score,
-            'error_type': error_type,
-            'phonemes': []  # Could be expanded with phoneme analysis
+        # Try a simple GET request to check service availability
+        headers = {
+            'Ocp-Apim-Subscription-Key': AZURE_SPEECH_KEY,
         }
         
-        word_details.append(word_detail)
+        # Test endpoint accessibility
+        test_response = requests.get(
+            f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/",
+            headers=headers,
+            timeout=10
+        )
+        
+        return jsonify({
+            'status': 'testing',
+            'azure_region': AZURE_SPEECH_REGION,
+            'azure_key_preview': f"{AZURE_SPEECH_KEY[:10]}...{AZURE_SPEECH_KEY[-4:]}",
+            'endpoint': endpoint,
+            'endpoint_test_status': test_response.status_code,
+            'endpoint_test_response': test_response.text[:200],
+            'current_issue': 'Azure returns 400 Bad Request for speech recognition',
+            'recommendation': 'Check service tier, region support, and pronunciation assessment availability'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'azure_region': AZURE_SPEECH_REGION,
+            'azure_key_preview': f"{AZURE_SPEECH_KEY[:10]}...{AZURE_SPEECH_KEY[-4:]}",
+            'recommendation': 'Azure service may not be accessible or configured correctly'
+        })
+
+def assess_pronunciation_azure_advanced(audio_path, topic="Business Communication"):
+    """
+    Proper Azure pronunciation assessment with content assessment following official pattern
+    """
+    if not AZURE_SDK_AVAILABLE or not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
+        print("Azure Speech SDK not available - using fallback")
+        return transcribe_with_openai_whisper_fallback(audio_path)
     
-    # Count how many words are marked as mispronounced
-    mispronounced_count = sum(1 for w in word_details if w['accuracy_score'] < PRONUNCIATION_THRESHOLD)
-    total_words = len(word_details)
-    
-    print(f"Created realistic pronunciation assessment for {total_words} words")
-    print(f"Marked {mispronounced_count} words as mispronounced ({mispronounced_count/total_words*100:.1f}%)")
-    
-    return word_details
+    try:
+        print(f"=== AZURE PRONUNCIATION ASSESSMENT ===")
+        print(f"Audio file: {audio_path}")
+        print(f"Topic: {topic}")
+        
+        # Create speech config
+        speech_config = speechsdk.SpeechConfig(
+            subscription=AZURE_SPEECH_KEY, 
+            region=AZURE_SPEECH_REGION
+        )
+        speech_config.speech_recognition_language = "en-US"
+        
+        # Create audio config from file
+        audio_config = speechsdk.audio.AudioConfig(filename=audio_path)
+        
+        # Create speech recognizer
+        recognizer = speechsdk.SpeechRecognizer(
+            speech_config=speech_config,
+            audio_config=audio_config
+        )
+        
+        # Configure pronunciation assessment with content assessment
+        enable_miscue = True
+        pron_config = speechsdk.PronunciationAssessmentConfig(
+            reference_text="",  # Empty for unscripted assessment
+            grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
+            granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
+            enable_miscue=enable_miscue
+        )
+        
+        # Enable prosody assessment
+        try:
+            pron_config.enable_prosody_assessment()
+            print("✅ Prosody assessment enabled")
+        except Exception as e:
+            print(f"⚠️ Prosody assessment failed: {e}")
+        
+        # Enable content assessment with topic
+        try:
+            pron_config.enable_content_assessment_with_topic(topic)
+            print(f"✅ Content assessment enabled for topic: {topic}")
+        except Exception as e:
+            print(f"⚠️ Content assessment failed: {e}")
+        
+        # Apply pronunciation config to recognizer
+        pron_config.apply_to(recognizer)
+        
+        print("Starting single-shot recognition for pronunciation assessment...")
+        
+        # Use single-shot recognition instead of continuous recognition
+        try:
+            result = recognizer.recognize_once()
+            
+            if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                full_transcript = result.text.strip()
+                print(f"✅ Recognized: {full_transcript}")
+                
+                # Get pronunciation assessment result from the single result
+                try:
+                    pron_result = speechsdk.PronunciationAssessmentResult(result)
+                    print(f"📊 Pronunciation assessment retrieved successfully")
+                    
+                    # Get content assessment result if available
+                    content_assessment = None
+                    if hasattr(pron_result, 'content_assessment_result') and pron_result.content_assessment_result:
+                        content_assessment = pron_result.content_assessment_result
+                        print(f"📋 Content scores - Grammar: {content_assessment.grammar_score}, "
+                              f"Vocabulary: {content_assessment.vocabulary_score}, "
+                              f"Topic: {content_assessment.topic_score}")
+                    else:
+                        print("⚠️ No content assessment data available")
+                    
+                    # Build assessment result
+                    assessment_result = {
+                        'transcript': full_transcript,
+                        'assessment_mode': 'azure_advanced_sdk_single_shot'
+                    }
+                    
+                    # Extract word-level pronunciation data
+                    word_details = []
+                    try:
+                        if hasattr(pron_result, 'words') and pron_result.words:
+                            print(f"🔍 Azure returned {len(pron_result.words)} word-level assessments")
+                            for word_obj in pron_result.words:
+                                # Extract phoneme details if available
+                                phonemes = []
+                                if hasattr(word_obj, 'phonemes') and word_obj.phonemes:
+                                    phonemes = [{'phoneme': p.phoneme, 'accuracy_score': p.accuracy_score} 
+                                              for p in word_obj.phonemes]
+                                
+                                # Determine error type based on Azure's assessment
+                                error_type = "None"
+                                if hasattr(word_obj, 'error_type') and word_obj.error_type:
+                                    error_type = str(word_obj.error_type)
+                                elif word_obj.accuracy_score < 60:
+                                    error_type = "Mispronunciation"
+                                elif word_obj.accuracy_score < 75:
+                                    error_type = "Slight mispronunciation"
+                                
+                                word_detail = {
+                                    'word': word_obj.word,
+                                    'accuracy_score': word_obj.accuracy_score,
+                                    'error_type': error_type,
+                                    'phonemes': phonemes
+                                }
+                                word_details.append(word_detail)
+                                
+                                print(f"📊 Word '{word_obj.word}': {word_obj.accuracy_score}% accuracy, error: {error_type}")
+                        else:
+                            print("⚠️ Azure pronunciation result has no word-level data")
+                            print(f"Available attributes on pron_result: {dir(pron_result)}")
+                            
+                    except Exception as word_error:
+                        print(f"❌ Error extracting word details: {word_error}")
+                    
+                    assessment_result['word_details'] = word_details
+                    print(f"📋 Final word details count: {len(word_details)}")
+                    
+                    # Add overall pronunciation scores
+                    try:
+                        assessment_result['accuracy_score'] = pron_result.accuracy_score
+                        assessment_result['fluency_score'] = pron_result.fluency_score
+                        assessment_result['pronunciation_score'] = pron_result.pronunciation_score
+                        
+                        if hasattr(pron_result, 'completeness_score'):
+                            assessment_result['completeness_score'] = pron_result.completeness_score
+                        
+                        if hasattr(pron_result, 'prosody_score'):
+                            assessment_result['prosody_score'] = pron_result.prosody_score
+                            
+                        print(f"📈 Overall scores - Accuracy: {pron_result.accuracy_score}, "
+                              f"Fluency: {pron_result.fluency_score}, "
+                              f"Pronunciation: {pron_result.pronunciation_score}")
+                        
+                    except AttributeError as attr_error:
+                        print(f"⚠️ Some pronunciation scores not available: {attr_error}")
+                        print(f"Available methods: {[method for method in dir(pron_result) if not method.startswith('_')]}")
+                    except Exception as score_error:
+                        print(f"❌ Could not get pronunciation scores: {score_error}")
+                    
+                    # Add content assessment data if available
+                    if content_assessment:
+                        assessment_result['content_assessment'] = {
+                            'grammar_score': content_assessment.grammar_score,
+                            'vocabulary_score': content_assessment.vocabulary_score,
+                            'topic_score': content_assessment.topic_score
+                        }
+                    
+                    print(f"✅ Azure single-shot assessment completed successfully")
+                    return assessment_result
+                    
+                except Exception as pron_error:
+                    print(f"❌ Error getting pronunciation assessment: {pron_error}")
+                    # Fall back to basic transcript with empty assessment
+                    return {
+                        'transcript': full_transcript,
+                        'word_details': [],
+                        'assessment_mode': 'azure_transcription_only'
+                    }
+                    
+            elif result.reason == speechsdk.ResultReason.NoMatch:
+                print("❌ No speech could be recognized")
+                return transcribe_with_openai_whisper_fallback(audio_path)
+            elif result.reason == speechsdk.ResultReason.Canceled:
+                cancellation_details = result.cancellation_details
+                print(f"❌ Speech recognition canceled: {cancellation_details.reason}")
+                if cancellation_details.error_details:
+                    print(f"❌ Error details: {cancellation_details.error_details}")
+                return transcribe_with_openai_whisper_fallback(audio_path)
+            else:
+                print(f"❌ Recognition failed with reason: {result.reason}")
+                return transcribe_with_openai_whisper_fallback(audio_path)
+                
+        except Exception as recognition_error:
+            print(f"❌ Recognition process failed: {recognition_error}")
+            return transcribe_with_openai_whisper_fallback(audio_path)
+        
+    except Exception as e:
+        print(f"❌ Azure advanced assessment failed: {str(e)}")
+        print("Falling back to OpenAI Whisper...")
+        return transcribe_with_openai_whisper_fallback(audio_path)
+
+def get_topic_for_conversation(session_id):
+    """
+    Get the appropriate topic context for pronunciation assessment
+    """
+    if session_id in sessions:
+        topic_mapping = {
+            'Business': 'Business Communication',
+            'Technology': 'Technology Discussion', 
+            'Interview Roleplay': 'Job Interview',
+            'Dating Roleplay': 'Social Conversation',
+            'Client Meeting': 'Professional Presentation'
+        }
+        session_topic = sessions[session_id].get('topic', 'Business')
+        return topic_mapping.get(session_topic, 'General Conversation')
+    return 'General Conversation'
 
 if __name__ == '__main__':
     # Ensure temp directory exists
