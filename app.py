@@ -712,105 +712,81 @@ def create_enhanced_context(session_id):
 #         raise Exception(f"Speech synthesis failed: {speech_synthesis_result.reason}")
 
 def generate_speech(text):
-    """Generate speech using Azure TTS with fallback to OpenAI TTS"""
-    # If Azure SDK is not available or credentials missing, use OpenAI directly
-    if not AZURE_SDK_AVAILABLE or not AZURE_SPEECH_KEY or not AZURE_SPEECH_REGION:
-        print(f"Using OpenAI TTS (Azure not available): {text[:50]}...")
-        return generate_speech_openai(text)
-    
+    """Generate speech using OpenAI TTS (primary) with Azure TTS fallback"""
     try:
-        print(f"Trying Azure TTS for: {text[:50]}...")
-        
-        # Additional runtime check for Azure platform initialization
-        try:
-            speech_config = speechsdk.SpeechConfig(
-                subscription=AZURE_SPEECH_KEY, 
-                region=AZURE_SPEECH_REGION
-            )
-        except Exception as config_error:
-            print(f"Azure config creation failed: {config_error}")
-            raise Exception("Azure config failed")
-            
-        speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
-        
-        output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
-        
-        try:
-            audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
-        except Exception as audio_config_error:
-            print(f"Azure audio config failed: {audio_config_error}")
-            raise Exception("Azure audio config failed")
-        
-        try:
-            speech_synthesizer = speechsdk.SpeechSynthesizer(
-                speech_config=speech_config, 
-                audio_config=audio_config
-            )
-        except Exception as synthesizer_error:
-            print(f"Azure synthesizer creation failed: {synthesizer_error}")
-            raise Exception("Azure synthesizer failed")
-        
-        try:
-            speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
-        except Exception as synthesis_error:
-            print(f"Azure synthesis execution failed: {synthesis_error}")
-            raise Exception("Azure synthesis execution failed")
-        
-        if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            print("Azure TTS successful")
-            return output_path
-        else:
-            raise Exception(f"Azure TTS failed with reason: {speech_synthesis_result.reason}")
-            
-    except Exception as e:
-        print(f"Azure TTS failed, falling back to OpenAI: {str(e)}")
+        print(f"🎵 Using OpenAI TTS for natural voice: {text[:50]}...")
         return generate_speech_openai(text)
+        
+    except Exception as openai_error:
+        print(f"⚠️ OpenAI TTS failed: {openai_error}")
+        
+        # Fallback to Azure TTS only if OpenAI fails
+        if AZURE_SDK_AVAILABLE and AZURE_SPEECH_KEY and AZURE_SPEECH_REGION:
+            try:
+                print(f"🔄 Falling back to Azure TTS: {text[:50]}...")
+                
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=AZURE_SPEECH_KEY, 
+                    region=AZURE_SPEECH_REGION
+                )
+                speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+                
+                output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+                audio_config = speechsdk.audio.AudioOutputConfig(filename=output_path)
+                speech_synthesizer = speechsdk.SpeechSynthesizer(
+                    speech_config=speech_config, 
+                    audio_config=audio_config
+                )
+                
+                speech_synthesis_result = speech_synthesizer.speak_text_async(text).get()
+                
+                if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                    print("✅ Azure TTS fallback successful")
+                    return output_path
+                else:
+                    raise Exception(f"Azure TTS failed: {speech_synthesis_result.reason}")
+                    
+            except Exception as azure_error:
+                print(f"❌ Both OpenAI and Azure TTS failed: {azure_error}")
+                raise Exception(f"All TTS services failed: OpenAI={openai_error}, Azure={azure_error}")
+        else:
+            print("❌ Azure TTS not available as fallback")
+            raise Exception(f"OpenAI TTS failed and no Azure fallback: {openai_error}")
 
 def generate_speech_openai(text):
-    """Fallback speech generation using OpenAI TTS"""
+    """Enhanced OpenAI TTS with premium voice for pronunciation tutoring"""
     try:
-        print("Using OpenAI TTS...")
+        print("🎵 Generating natural OpenAI TTS...")
         
         # Check if OpenAI API key is available
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise Exception("OpenAI API key not available")
         
-        # Use the simplest OpenAI approach to avoid compatibility issues
-        try:
-            # Set the API key globally (most compatible approach)
-            openai.api_key = api_key
-            
-            # Create the client without any extra parameters
-            response = openai.audio.speech.create(
-                model="tts-1",
-                voice="nova",
-                input=text
-            )
-            print("OpenAI TTS call successful")
-            
-        except Exception as openai_error:
-            print(f"OpenAI TTS call failed: {openai_error}")
-            raise Exception(f"OpenAI TTS failed: {openai_error}")
+        # Set the API key globally (most compatible approach)
+        openai.api_key = api_key
+        
+        # Use premium model and voice optimized for pronunciation tutoring
+        response = openai.audio.speech.create(
+            model="tts-1-hd",  # Higher quality HD model
+            voice="alloy",     # Clear, professional voice perfect for tutoring
+            input=text,
+            speed=0.9          # Slightly slower for better clarity
+        )
+        print("✅ OpenAI TTS generation successful")
         
         output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
         
         # Write the audio content to file
-        try:
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
-            print("Audio file written successfully")
-        except Exception as write_error:
-            print(f"File writing failed: {write_error}")
-            raise Exception("Failed to write audio file")
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
+        print(f"💾 Audio saved: {os.path.basename(output_path)}")
         
-        print("OpenAI TTS successful")
         return output_path
         
     except Exception as e:
-        print(f"OpenAI TTS error: {str(e)}")
-        raise Exception(f"Speech generation failed: {str(e)}")
-
+        print(f"❌ OpenAI TTS error: {str(e)}")
+        raise Exception(f"OpenAI TTS failed: {str(e)}")
 
 def create_fallback_pronunciation_assessment(reference_text):
     """
@@ -1817,103 +1793,7 @@ def analyze_audio_content(audio_path):
     except Exception as e:
         return f"Analysis failed: {e}"
 
-# def create_realistic_pronunciation_assessment(transcript):
-#     """
-#     Create a realistic pronunciation assessment based on word complexity and common pronunciation challenges
-#     This simulates what Azure would detect, accounting for the fact that Whisper auto-corrects
-#     """
-#     import random
-#     import re
-    
-#     words = transcript.split()
-#     word_details = []
-    
-#     # Reduced penalties for more realistic assessment
-#     difficult_patterns = {
-#         r'th': 8,  # 'th' sounds (reduced from 15)
-#         r'[rl]': 5,  # 'r' and 'l' confusion (reduced from 10)
-#         r'tion$': 6,  # '-tion' endings (reduced from 12)
-#         r'sion$': 6,  # '-sion' endings (reduced from 12)
-#         r'ough': 10,  # 'ough' variations (reduced from 18)
-#         r'[bcdfghjklmnpqrstvwxyz]{3,}': 8,  # Consonant clusters (reduced from 15)
-#         r'eau|ieu': 12,  # French-origin sounds (reduced from 20)
-#         r'sch|tch': 5,  # Complex consonant combinations (reduced from 10)
-#     }
-    
-#     # Reduced penalties for challenging words - only truly difficult ones get marked
-#     challenging_words = {
-#         'entrepreneur': 15, 'pronunciation': 12, 'particularly': 10,  # Reduced penalties
-#         'comfortable': 8, 'temperature': 8, 'vegetable': 6,
-#         'chocolate': 4, 'interesting': 6, 'different': 3,
-#         'business': 4, 'technology': 6, 'development': 5,
-#         'communication': 8, 'organization': 10, 'responsibility': 12,
-#         'opportunity': 8, 'environment': 6, 'government': 4,
-#         'international': 10, 'professional': 8, 'experience': 6,
-#         'important': 3, 'information': 6, 'education': 5,
-#         'relationship': 8, 'management': 4, 'performance': 6,
-#         'successful': 5, 'knowledge': 4, 'strength': 6,
-#         'through': 8, 'although': 6, 'thought': 5,
-#         'enough': 4, 'rough': 6, 'cough': 4
-#     }
-    
-#     for word in words:
-#         word_lower = word.lower().strip('.,!?;:"')
-        
-#         # Higher base scores - most words should be pronounced correctly
-#         if len(word_lower) <= 3:
-#             base_score = random.randint(88, 95)  # Short words are easy (increased)
-#         elif len(word_lower) <= 5:
-#             base_score = random.randint(82, 92)  # Medium words (increased)
-#         elif len(word_lower) <= 8:
-#             base_score = random.randint(78, 88)  # Longer words (increased)
-#         else:
-#             base_score = random.randint(72, 85)  # Very long words (increased)
-        
-#         # Check if it's a known challenging word
-#         if word_lower in challenging_words:
-#             penalty = challenging_words[word_lower]
-#             base_score -= penalty
-#             print(f"Applied {penalty} penalty for challenging word: {word_lower}")
-        
-#         # Apply pattern-based penalties (reduced impact)
-#         for pattern, penalty in difficult_patterns.items():
-#             if re.search(pattern, word_lower):
-#                 actual_penalty = random.randint(penalty//3, penalty//2)  # Reduced penalty application
-#                 base_score -= actual_penalty
-#                 print(f"Applied {actual_penalty} pattern penalty for '{pattern}' in word: {word_lower}")
-#                 break  # Only apply one pattern penalty per word
-        
-#         # Reduced randomness for more consistent scoring
-#         base_score += random.randint(-3, 5)  # Slight positive bias
-        
-#         # Ensure score stays in reasonable range
-#         final_score = max(45, min(95, base_score))
-        
-#         # More lenient error type classification
-#         if final_score < 65:  # Raised threshold from 60
-#             error_type = 'Mispronunciation'
-#         elif final_score < 78:  # Raised threshold from 75
-#             error_type = 'Slight mispronunciation'
-#         else:
-#             error_type = 'None'
-        
-#         word_detail = {
-#             'word': word.strip('.,!?;:"'),  # Remove punctuation for word
-#             'accuracy_score': final_score,
-#             'error_type': error_type,
-#             'phonemes': []  # Could be expanded with phoneme analysis
-#         }
-        
-#         word_details.append(word_detail)
-    
-#     # Count how many words are marked as mispronounced
-#     mispronounced_count = sum(1 for w in word_details if w['accuracy_score'] < PRONUNCIATION_THRESHOLD)
-#     total_words = len(word_details)
-    
-#     print(f"Created realistic pronunciation assessment for {total_words} words")
-#     print(f"Marked {mispronounced_count} words as mispronounced ({mispronounced_count/total_words*100:.1f}%)")
-    
-#     return word_details
+
 
 @app.route('/api/test_azure', methods=['GET'])
 def test_azure_service():
