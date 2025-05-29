@@ -12,11 +12,7 @@ import openai
 try:
     import azure.cognitiveservices.speech as speechsdk
     print("=== Azure Speech SDK imported successfully ===")
-    
-    # Disable SDK due to Windows compatibility issues
-    print("=== Azure Speech SDK disabled due to platform compatibility ===")
-    AZURE_SDK_AVAILABLE = False
-        
+    AZURE_SDK_AVAILABLE = True
 except ImportError as import_error:
     print(f"=== Azure Speech SDK import failed: {import_error} ===")
     print("=== Will use Azure REST API only ===")
@@ -732,7 +728,7 @@ def generate_speech(text):
         return generate_speech_openai(text)
 
 def generate_speech_openai(text):
-    """Fallback speech generation using OpenAI TTS"""
+    """Fallback speech generation using OpenAI TTS HTTP API"""
     try:
         print("Using OpenAI TTS...")
         
@@ -741,24 +737,27 @@ def generate_speech_openai(text):
         if not api_key:
             raise Exception("OpenAI API key not available")
         
-        # Use the simplest OpenAI approach to avoid compatibility issues
-        try:
-            # Set the API key globally (most compatible approach)
-            openai.api_key = api_key
-            
-            # Create the client without any extra parameters
-            response = openai.audio.speech.create(
-                model="tts-1",
-                voice="nova",
-                input=text
-            )
-            print("OpenAI TTS call successful")
-            
-        except Exception as openai_error:
-            print(f"OpenAI TTS call failed: {openai_error}")
-            raise Exception(f"OpenAI TTS failed: {openai_error}")
+        # Use HTTP requests instead of SDK to avoid proxies issue
+        url = "https://api.openai.com/v1/audio/speech"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "tts-1",  # You can change to "gpt-4o-mini-tts" if you have access
+            "input": text,
+            "voice": "nova"  # or "alloy", "echo", "fable", "onyx", "shimmer"
+        }
         
-        output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.wav")
+        print("Making OpenAI TTS HTTP request...")
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        
+        if response.status_code == 200:
+            print("OpenAI TTS HTTP request successful")
+        else:
+            raise Exception(f"OpenAI TTS API error: {response.status_code} - {response.text}")
+        
+        output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.mp3")
         
         # Write the audio content to file
         try:

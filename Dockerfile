@@ -7,6 +7,10 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     libasound2-dev \
     build-essential \
+    libcurl4 \
+    libffi-dev \
+    libnss3 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
