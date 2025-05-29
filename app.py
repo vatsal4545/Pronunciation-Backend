@@ -100,7 +100,9 @@ You are an AI pronunciation tutor named Speak Spark. Your job is to engage users
 #     except Exception as e:
 #         return jsonify({'error': str(e)}), 500
 
-
+@app.route("/")
+def home():
+    return "AI Tutor backend is running!"
 
 @app.route('/api/generate_speech', methods=['POST'])
 def generate_speech_endpoint():
