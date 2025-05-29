@@ -2022,6 +2022,54 @@ def create_realistic_pronunciation_assessment(transcript):
     
     return word_details
 
+@app.route('/api/debug_tts', methods=['POST'])
+def debug_tts():
+    """Debug TTS functionality in production"""
+    try:
+        # Test temp directory access
+        temp_dir = tempfile.gettempdir()
+        test_file = os.path.join(temp_dir, f"test_{uuid.uuid4()}.txt")
+        
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.unlink(test_file)
+        
+        # Test OpenAI TTS directly
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return jsonify({'error': 'OpenAI API key not found'}), 400
+            
+        # Simple OpenAI TTS test
+        openai.api_key = api_key
+        response = openai.audio.speech.create(
+            model="tts-1",
+            voice="nova", 
+            input="Test speech generation"
+        )
+        
+        output_path = os.path.join(temp_dir, f"debug_{uuid.uuid4()}.wav")
+        with open(output_path, 'wb') as f:
+            f.write(response.content)
+            
+        file_size = os.path.getsize(output_path)
+        os.unlink(output_path)
+        
+        return jsonify({
+            'status': 'success',
+            'temp_dir': temp_dir,
+            'temp_writable': True,
+            'openai_tts_working': True,
+            'file_size': file_size
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'temp_dir': tempfile.gettempdir(),
+            'temp_writable': False
+        }), 500
+
 if __name__ == '__main__':
     # Ensure temp directory exists
     os.makedirs(os.path.join(tempfile.gettempdir()), exist_ok=True)
