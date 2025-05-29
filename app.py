@@ -1597,68 +1597,9 @@ def transcribe_simple_azure_rest(audio_path):
         # If Azure detected audio but no transcript, try OpenAI Whisper as backup
         if basic_result and basic_result.get('Duration', 0) > 0:
             print("\n=== AZURE DETECTED AUDIO BUT NO TRANSCRIPT ===")
-            print("Trying OpenAI Whisper as backup transcription...")
-            
-            try:
-                # Use OpenAI Whisper for transcription
-                api_key = os.getenv("OPENAI_API_KEY")
-                if api_key:
-                    headers = {"Authorization": f"Bearer {api_key}"}
-                    
-                    with open(audio_path, "rb") as audio_file:
-                        files = {
-                            "file": ("audio.mp4", audio_file, "audio/mp4"),
-                            "model": (None, "whisper-1"),
-                            "response_format": (None, "text")
-                        }
-                        
-                        print("Calling OpenAI Whisper for transcription...")
-                        response = requests.post(
-                            "https://api.openai.com/v1/audio/transcriptions",
-                            headers=headers,
-                            files=files,
-                            timeout=30
-                        )
-                        
-                        if response.status_code == 200:
-                            whisper_transcript = response.text.strip()
-                            print(f"OpenAI Whisper transcript: '{whisper_transcript}'")
-                            
-                            if whisper_transcript:
-                                print("SUCCESS! Using OpenAI Whisper transcript with simulated pronunciation assessment")
-                                
-                                # Since Whisper auto-corrects, we'll simulate pronunciation issues
-                                # based on word complexity and common pronunciation challenges
-                                word_details = create_realistic_pronunciation_assessment(whisper_transcript)
-                                
-                                # Calculate overall scores based on word difficulties
-                                accuracy_scores = [w['accuracy_score'] for w in word_details]
-                                avg_accuracy = sum(accuracy_scores) / len(accuracy_scores) if accuracy_scores else 80
-                                
-                                # Create marked transcript for AI (showing "mispronounced" words)
-                                marked_transcript = whisper_transcript
-                                for word_detail in word_details:
-                                    if word_detail['accuracy_score'] < PRONUNCIATION_THRESHOLD:
-                                        import re
-                                        pattern = re.compile(r'\\b' + re.escape(word_detail['word']) + r'\\b', re.IGNORECASE)
-                                        marked_transcript = pattern.sub(f"[MISPRONOUNCED: {word_detail['word']}]", marked_transcript, count=1)
-                                
-                                return {
-                                    'transcript': whisper_transcript,  # Clean transcript for display
-                                    'marked_transcript': marked_transcript,  # Marked transcript for AI
-                                    'accuracy_score': int(avg_accuracy),
-                                    'fluency_score': max(70, int(avg_accuracy + 5)),
-                                    'pronunciation_score': int(avg_accuracy),
-                                    'word_details': word_details,
-                                    'assessment_mode': 'whisper_with_simulated_pronunciation'
-                                }
-                        else:
-                            print(f"OpenAI Whisper failed: {response.status_code} - {response.text}")
-                            
-            except Exception as whisper_error:
-                print(f"OpenAI Whisper backup failed: {whisper_error}")
+            print("Azure detected audio but could not transcribe. Returning fallback.")
         
-        print("\n=== ALL METHODS FAILED ===")
+        print("\n=== AZURE TRANSCRIPTION FAILED ===")
         print("Returning fallback assessment")
         
         return {
